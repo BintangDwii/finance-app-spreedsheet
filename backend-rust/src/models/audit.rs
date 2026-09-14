@@ -1,4 +1,4 @@
-use chrono::NaiveDateTime;
+use chrono::{DateTime, Utc};
 use serde::Serialize;
 
 use crate::domain::{AuditId, TransaksiId};
@@ -11,7 +11,7 @@ pub struct AuditLog {
     pub from_status: Option<String>,
     pub to_status: Option<String>,
     pub catatan: Option<String>,
-    pub timestamp: Option<NaiveDateTime>,
+    pub timestamp: Option<DateTime<Utc>>,
 }
 
 #[cfg(test)]

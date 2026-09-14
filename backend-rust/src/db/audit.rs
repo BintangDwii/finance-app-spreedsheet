@@ -8,7 +8,7 @@ const INSERT_AUDIT_SQL: &str =
 
 pub async fn list_recent(pool: &PgPool, limit: i64) -> Result<Vec<AuditLog>, sqlx::Error> {
     sqlx::query_as::<_, AuditLog>(
-        "SELECT id, transaksi_id, actor, from_status, to_status, catatan, timestamp::text FROM audit_log ORDER BY timestamp DESC LIMIT $1"
+        "SELECT id, transaksi_id, actor, from_status, to_status, catatan, timestamp FROM audit_log ORDER BY timestamp DESC LIMIT $1"
     )
     .bind(limit)
     .fetch_all(pool)

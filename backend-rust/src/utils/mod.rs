@@ -1,4 +1,5 @@
 pub mod blocking;
+pub mod cookie;
 pub mod currency;
 pub mod excel;
 pub mod jwt;

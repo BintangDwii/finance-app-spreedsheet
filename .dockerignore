@@ -1,0 +1,6 @@
+target/
+.git/
+data/
+backend-rust/.env
+frontend/node_modules/
+**/*.rs.bk

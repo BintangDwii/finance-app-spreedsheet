@@ -45,23 +45,35 @@ async fn main() -> Result<()> {
 
     let app_state = AppState { pool: pool.clone() };
 
+    std::fs::create_dir_all("uploads").ok();
+
     let public_routes = Router::new()
         .route("/health", get(handlers::health::health_check))
+        .nest_service("/uploads", tower_http::services::ServeDir::new("uploads"))
+        .nest_service(
+            "/api/uploads",
+            tower_http::services::ServeDir::new("uploads"),
+        )
         .route("/api/auth/login", post(handlers::auth::login))
-        .route("/api/auth/me", get(handlers::auth::me));
+        .route("/api/auth/logout", post(handlers::auth::logout));
 
     let protected_routes = Router::new()
+        .route("/api/auth/me", get(handlers::auth::me))
         .route(
             "/api/transaksi",
             get(handlers::transactions::list).post(handlers::transactions::create),
         )
         .route(
-            "/api/transaksi/:id/status",
-            post(handlers::transactions::update_status),
+            "/api/transaksi/:id",
+            get(handlers::transactions::get_by_id).delete(handlers::transactions::soft_delete),
         )
         .route(
-            "/api/transaksi/:id",
-            axum::routing::delete(handlers::transactions::soft_delete),
+            "/api/transaksi/:id/bukti",
+            post(handlers::transactions::upload_bukti),
+        )
+        .route(
+            "/api/transaksi/:id/status",
+            post(handlers::transactions::update_status),
         )
         .route("/api/saldo", get(handlers::saldo::get_saldo))
         .route(
@@ -100,7 +112,8 @@ async fn main() -> Result<()> {
             middleware::auth::jwt_auth,
         ));
 
-    // CORS whitelist via env — AGENTS.MD 7
+    // CORS whitelist via env — AGENTS.MD 7. allow_credentials(true) so the
+    // HttpOnly session cookie works same-origin / trusted SPA origin.
     let cors_origin = std::env::var("CORS_ALLOWED_ORIGIN")
         .unwrap_or_else(|_| "http://localhost:3000".to_string());
     tracing::info!(origin=%cors_origin, "CORS allowed origin");
@@ -110,15 +123,26 @@ async fn main() -> Result<()> {
                 .parse::<HeaderValue>()
                 .unwrap_or_else(|_| HeaderValue::from_static("http://localhost:3000")),
         )
-        .allow_methods([Method::GET, Method::POST, Method::DELETE, Method::OPTIONS])
+        .allow_methods([
+            Method::GET,
+            Method::POST,
+            Method::PUT,
+            Method::PATCH,
+            Method::DELETE,
+            Method::OPTIONS,
+        ])
         .allow_headers([
             axum::http::header::AUTHORIZATION,
             axum::http::header::CONTENT_TYPE,
-        ]);
+            axum::http::header::COOKIE,
+        ])
+        .expose_headers([axum::http::header::SET_COOKIE])
+        .allow_credentials(true);
 
     let app = Router::new()
         .merge(public_routes)
         .merge(protected_routes)
+        .fallback(handlers::spa::serve)
         .layer(cors)
         .with_state(app_state);
 

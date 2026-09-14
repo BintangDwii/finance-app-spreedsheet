@@ -6,4 +6,5 @@ pub mod export;
 pub mod health;
 pub mod reconcile;
 pub mod saldo;
+pub mod spa;
 pub mod transactions;

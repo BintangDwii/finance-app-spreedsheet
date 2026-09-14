@@ -2,7 +2,7 @@ use crate::models::budget::{Budget, VarianceRow};
 use sqlx::PgPool;
 
 pub async fn list_budgets(pool: &PgPool) -> Result<Vec<Budget>, sqlx::Error> {
-    sqlx::query_as::<_, Budget>("SELECT id, bulan, divisi, kategori, planned, currency FROM budgets ORDER BY bulan, divisi, kategori")
+    sqlx::query_as::<_, Budget>("SELECT id, bulan, divisi, kategori, planned::float8 AS planned, currency FROM budgets ORDER BY bulan, divisi, kategori")
         .fetch_all(pool)
         .await
 }
@@ -10,10 +10,10 @@ pub async fn list_budgets(pool: &PgPool) -> Result<Vec<Budget>, sqlx::Error> {
 pub async fn variance(pool: &PgPool) -> Result<Vec<VarianceRow>, sqlx::Error> {
     let sql = format!(
         r#"
-        SELECT b.bulan, b.divisi, b.kategori, b.planned,
-               COALESCE(a.actual,0) as actual,
-               b.planned - COALESCE(a.actual,0) as sisa,
-               CASE WHEN b.planned=0 THEN 0 ELSE ROUND(COALESCE(a.actual,0)/b.planned*100,1) END as burn
+        SELECT b.bulan, b.divisi, b.kategori, b.planned::float8 AS planned,
+               COALESCE(a.actual,0)::float8 as actual,
+               (b.planned - COALESCE(a.actual,0))::float8 as sisa,
+               CASE WHEN b.planned=0 THEN 0 ELSE ROUND(COALESCE(a.actual,0)/b.planned*100,1) END::float8 as burn
         FROM budgets b
         LEFT JOIN (
             SELECT to_char(tanggal::date,'YYYY-MM') as bulan, divisi, kategori, SUM(total_akhir * fx_rate) as actual

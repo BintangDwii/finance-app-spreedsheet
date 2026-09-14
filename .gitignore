@@ -1,0 +1,10 @@
+# Rust build outputs (workspace target dir is overridden via CARGO_TARGET_DIR,
+# but keep this for default setups)
+target/
+frontend/dist/
+# Python leftovers (legacy removed; migration script runs with system python)
+__pycache__/
+*.pyc
+*.db-shm
+*.db-wal
+uploads/

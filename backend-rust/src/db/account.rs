@@ -71,10 +71,10 @@ pub async fn update_status(
 pub async fn saldo_per_rekening(pool: &PgPool) -> Result<Vec<SaldoPerRekening>, sqlx::Error> {
     let sql = format!(
         r#"
-        SELECT a.bank_name, a.currency, a.opening_balance,
-               COALESCE(SUM(CASE WHEN t.jenis='Pemasukan' AND t.status IN ({paid}) THEN t.total_akhir END),0) as total_masuk,
-               COALESCE(SUM(CASE WHEN t.jenis='Pengeluaran' AND t.status IN ({paid}) THEN t.total_akhir END),0) as total_keluar,
-               a.opening_balance + COALESCE(SUM(CASE WHEN t.jenis='Pemasukan' THEN t.total_akhir WHEN t.jenis='Pengeluaran' THEN -t.total_akhir ELSE 0 END),0) as saldo
+        SELECT a.bank_name, a.currency, a.opening_balance::float8 AS opening_balance,
+               COALESCE(SUM(CASE WHEN t.jenis='Pemasukan' AND t.status IN ({paid}) THEN t.total_akhir END)::float8,0.0) as total_masuk,
+               COALESCE(SUM(CASE WHEN t.jenis='Pengeluaran' AND t.status IN ({paid}) THEN t.total_akhir END)::float8,0.0) as total_keluar,
+               (a.opening_balance + COALESCE(SUM(CASE WHEN t.jenis='Pemasukan' THEN t.total_akhir WHEN t.jenis='Pengeluaran' THEN -t.total_akhir ELSE 0 END),0))::float8 as saldo
         FROM accounts a
         LEFT JOIN transaksi t ON t.akun_pembayaran=a.bank_name AND t.is_deleted=false AND t.status IN ({paid})
         WHERE a.status='Aktif'
@@ -92,19 +92,15 @@ pub async fn saldo_summary(pool: &PgPool) -> Result<(f64, f64, f64), sqlx::Error
     let sql = format!(
         r#"
         SELECT 
-            COALESCE(SUM(CASE WHEN jenis='Pemasukan' AND status IN ({paid}) THEN total_akhir * fx_rate END),0) as masuk,
-            COALESCE(SUM(CASE WHEN jenis='Pengeluaran' AND status IN ({paid}) THEN total_akhir * fx_rate END),0) as keluar,
-            COALESCE(SUM(CASE WHEN jenis='Pemasukan' THEN total_akhir*fx_rate WHEN jenis='Pengeluaran' THEN -total_akhir*fx_rate ELSE 0 END),0) as saldo
+            COALESCE(SUM(CASE WHEN jenis='Pemasukan' AND status IN ({paid}) THEN total_akhir * fx_rate END)::float8,0.0) as masuk,
+            COALESCE(SUM(CASE WHEN jenis='Pengeluaran' AND status IN ({paid}) THEN total_akhir * fx_rate END)::float8,0.0) as keluar,
+            COALESCE(SUM(CASE WHEN jenis='Pemasukan' THEN total_akhir*fx_rate WHEN jenis='Pengeluaran' THEN -total_akhir*fx_rate ELSE 0 END)::float8,0.0) as saldo
         FROM transaksi WHERE is_deleted=false AND status IN ({paid})
         "#,
         paid = crate::utils::currency::PAID_STATUSES_SQL
     );
-    let row = sqlx::query_as::<_, (Option<f64>, Option<f64>, Option<f64>)>(&sql)
+    let row = sqlx::query_as::<_, (f64, f64, f64)>(&sql)
         .fetch_one(pool)
         .await?;
-    Ok((
-        row.0.unwrap_or(0.0),
-        row.1.unwrap_or(0.0),
-        row.2.unwrap_or(0.0),
-    ))
+    Ok(row)
 }

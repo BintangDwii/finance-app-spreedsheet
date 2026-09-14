@@ -1,12 +1,14 @@
 use axum::{
-    extract::{Extension, Path, Query, State},
+    extract::{Extension, Multipart, Path, Query, State},
     Json,
 };
 
 use crate::domain::{Jenis, TransaksiId, TransaksiStatus, UserRole};
 use crate::error::{AppError, Result};
 use crate::middleware::auth::Claims;
-use crate::models::transaksi::{CreateTransaksiRequest, ListParams, UpdateStatusRequest};
+use crate::models::transaksi::{
+    CreateTransaksiRequest, ListParams, SetBuktiRequest, UpdateStatusRequest,
+};
 use crate::utils::{currency, pagination, reference, sanitize, validation};
 
 #[tracing::instrument(skip(state, claims))]
@@ -20,6 +22,7 @@ pub async fn list(
     let (page, per_page, _) = pagination::normalize_page(params.page, params.per_page);
 
     tracing::info!(user = %claims.sub, page, per_page, "list transaksi");
+    // Call once each, reuse below (§Function Reuse Rules): rows + total share filters.
     let rows = crate::db::transaksi::list_filtered(
         pool,
         params.status,
@@ -30,9 +33,124 @@ pub async fn list(
         per_page,
     )
     .await?;
-    Ok(Json(
-        serde_json::json!({"data": rows, "page": page, "per_page": per_page}),
-    ))
+    let total = crate::db::transaksi::count_filtered(
+        pool,
+        params.status,
+        params.divisi.as_deref(),
+        params.jenis,
+        params.search.as_deref(),
+    )
+    .await?;
+    let total_pages = (total + per_page - 1) / per_page;
+    Ok(Json(serde_json::json!({
+        "data": rows,
+        "page": page,
+        "per_page": per_page,
+        "total": total,
+        "total_pages": total_pages,
+    })))
+}
+
+#[tracing::instrument(skip(state, _claims))]
+pub async fn get_by_id(
+    State(state): State<crate::AppState>,
+    Extension(_claims): Extension<Claims>,
+    Path(id): Path<i64>,
+) -> Result<Json<serde_json::Value>> {
+    let row = crate::db::transaksi::find_by_id(&state.pool, TransaksiId(id)).await?;
+    match row {
+        Some(t) => Ok(Json(serde_json::json!(t))),
+        None => Err(AppError::NotFound {
+            entity: "transaksi",
+            id: id.to_string(),
+        }),
+    }
+}
+
+#[tracing::instrument(skip(state, claims, multipart))]
+pub async fn upload_bukti(
+    State(state): State<crate::AppState>,
+    Extension(claims): Extension<Claims>,
+    Path(id): Path<i64>,
+    mut multipart: Multipart,
+) -> Result<Json<serde_json::Value>> {
+    if !crate::middleware::auth::require_role(&claims, &[UserRole::Maker]) {
+        return Err(AppError::Forbidden("Hanya Maker/Admin".into()));
+    }
+    let mut saved_name = None;
+    while let Some(field) = multipart
+        .next_field()
+        .await
+        .map_err(|e| AppError::Validation(e.to_string()))?
+    {
+        let field_name = field.name().unwrap_or("").to_string();
+        if field_name == "file" || field_name == "file_bukti" {
+            let file_name = field.file_name().unwrap_or("bukti.png").to_string();
+            let safe = crate::utils::cookie::validate_bukti_filename(&file_name)?;
+            let final_filename = format!("{}_{}", id, safe);
+
+            let data = field
+                .bytes()
+                .await
+                .map_err(|e| AppError::Validation(e.to_string()))?;
+            const MAX_FILE_BYTES: usize = 5 * 1024 * 1024; // 5MB limit
+            if data.len() > MAX_FILE_BYTES {
+                return Err(AppError::Validation(
+                    "Ukuran file bukti maksimal 5MB".into(),
+                ));
+            }
+
+            tokio::fs::create_dir_all("uploads")
+                .await
+                .map_err(|e| AppError::Internal(e.to_string()))?;
+
+            let filepath = std::path::Path::new("uploads").join(&final_filename);
+            tokio::fs::write(&filepath, &data)
+                .await
+                .map_err(|e| AppError::Internal(e.to_string()))?;
+
+            saved_name = Some(final_filename);
+            break;
+        }
+    }
+    let safe = saved_name
+        .ok_or_else(|| AppError::Validation("Field file/file_bukti tidak ditemukan".into()))?;
+
+    let affected =
+        crate::db::transaksi::update_file_bukti(&state.pool, TransaksiId(id), &safe).await?;
+    if affected == 0 {
+        return Err(AppError::NotFound {
+            entity: "transaksi",
+            id: id.to_string(),
+        });
+    }
+    tracing::info!(id, file=%safe, actor=%claims.sub, "bukti uploaded via multipart");
+    Ok(Json(serde_json::json!({"id": id, "file_bukti": safe})))
+}
+
+#[tracing::instrument(skip(state, claims))]
+pub async fn set_bukti(
+    State(state): State<crate::AppState>,
+    Extension(claims): Extension<Claims>,
+    Path(id): Path<i64>,
+    Json(payload): Json<SetBuktiRequest>,
+) -> Result<Json<serde_json::Value>> {
+    if !crate::middleware::auth::require_role(&claims, &[UserRole::Maker]) {
+        return Err(AppError::Forbidden("Hanya Maker/Admin".into()));
+    }
+    validation::validate_or_400(&payload)?;
+    // Validate + sanitize filename centrally (§7), reuse for DB write.
+    let safe = crate::utils::cookie::validate_bukti_filename(&payload.file_bukti)?;
+    let affected =
+        crate::db::transaksi::update_file_bukti(&state.pool, TransaksiId(id), &safe).await?;
+    if affected == 0 {
+        return Err(AppError::NotFound {
+            entity: "transaksi",
+            id: id.to_string(),
+        });
+    }
+    tracing::info!(id, file=%safe, actor=%claims.sub, "bukti updated");
+    Ok(Json(serde_json::json!({"id": id, "file_bukti": safe})))
 }
 
 #[tracing::instrument(skip(state, claims))]

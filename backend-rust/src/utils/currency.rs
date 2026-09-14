@@ -19,10 +19,8 @@ pub fn parse_currency(s: &str) -> Currency {
 }
 
 pub fn to_idr(total: f64, currency: Currency, fx_rate: f64) -> f64 {
-    match currency {
-        Currency::USD => total * fx_rate,
-        Currency::IDR => total,
-    }
+    // Single implementation lives in shared::format (§10 DRY) — delegate.
+    shared::format::to_idr(total, currency, fx_rate)
 }
 
 pub fn fx_or_one(fx: Option<f64>) -> f64 {

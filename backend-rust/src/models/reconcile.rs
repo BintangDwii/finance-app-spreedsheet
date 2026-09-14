@@ -14,7 +14,7 @@ pub struct Reconciliation {
     pub matched_transaksi_id: Option<TransaksiId>,
     pub status: ReconStatus,
     pub uploaded_by: Option<String>,
-    pub created_at: Option<chrono::NaiveDateTime>,
+    pub created_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 #[derive(Debug, Deserialize, Validate)]

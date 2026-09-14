@@ -25,17 +25,15 @@ pub async fn jwt_auth(
     mut request: Request,
     next: Next,
 ) -> Result<Response, (StatusCode, Json<serde_json::Value>)> {
-    let auth = headers
-        .get("authorization")
-        .and_then(|v| v.to_str().ok())
-        .ok_or_else(|| {
-            (
-                StatusCode::UNAUTHORIZED,
-                Json(serde_json::json!({"error": "Missing Authorization header"})),
-            )
-        })?;
-
-    let token = auth.strip_prefix("Bearer ").unwrap_or(auth);
+    let auth = headers.get("authorization").and_then(|v| v.to_str().ok());
+    let cookie = headers.get("cookie").and_then(|v| v.to_str().ok());
+    // Call once, reuse (§Function Reuse Rules): Bearer preferred, cookie fallback.
+    let token = crate::utils::cookie::extract_token(auth, cookie).ok_or_else(|| {
+        (
+            StatusCode::UNAUTHORIZED,
+            Json(serde_json::json!({"error": "Missing Authorization header or session cookie"})),
+        )
+    })?;
     let secret = crate::utils::jwt::jwt_secret().map_err(|e| {
         tracing::error!(error=%e, "JWT_SECRET missing");
         (
@@ -44,7 +42,7 @@ pub async fn jwt_auth(
         )
     })?;
     let token_data = decode::<Claims>(
-        token,
+        token.as_str(),
         &DecodingKey::from_secret(secret.as_bytes()),
         &Validation::new(Algorithm::HS256),
     )

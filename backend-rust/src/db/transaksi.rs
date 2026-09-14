@@ -44,12 +44,68 @@ pub async fn list_filtered(
     Ok(rows)
 }
 
+pub async fn count_filtered(
+    pool: &PgPool,
+    status: Option<TransaksiStatus>,
+    divisi: Option<&str>,
+    jenis: Option<Jenis>,
+    search: Option<&str>,
+) -> Result<i64, sqlx::Error> {
+    // Same WHERE contract as list_filtered (§10: keep in sync).
+    let search_escaped = search.map(escape_like);
+    let total: i64 = sqlx::query_scalar(
+        r#"
+        SELECT COUNT(*)
+        FROM transaksi
+        WHERE is_deleted=false
+          AND ($1::status_t IS NULL OR status=$1)
+          AND ($2::text IS NULL OR divisi=$2)
+          AND ($3::jenis_t IS NULL OR jenis=$3)
+          AND ($4::text IS NULL OR (entitas_terkait ILIKE '%' || $4 || '%' ESCAPE '\' OR catatan ILIKE '%' || $4 || '%' ESCAPE '\' OR reference_no ILIKE '%' || $4 || '%' ESCAPE '\'))
+        "#,
+    )
+    .bind(status)
+    .bind(divisi)
+    .bind(jenis)
+    .bind(search_escaped.as_deref())
+    .fetch_one(pool)
+    .await?;
+    Ok(total)
+}
+
+pub async fn find_by_id(pool: &PgPool, id: TransaksiId) -> Result<Option<Transaksi>, sqlx::Error> {
+    let sql = format!(
+        "SELECT {cols} FROM transaksi WHERE id=$1 AND is_deleted=false",
+        cols = TRANSAKSI_COLS_TEXT
+    );
+    sqlx::query_as::<_, Transaksi>(&sql)
+        .bind(id.0)
+        .fetch_optional(pool)
+        .await
+}
+
+/// Update `file_bukti` reference (§7: caller must validate filename first).
+pub async fn update_file_bukti(
+    pool: &PgPool,
+    id: TransaksiId,
+    filename: &str,
+) -> Result<u64, sqlx::Error> {
+    let res = sqlx::query(
+        "UPDATE transaksi SET file_bukti=$1, updated_at=now() WHERE id=$2 AND is_deleted=false",
+    )
+    .bind(filename)
+    .bind(id.0)
+    .execute(pool)
+    .await?;
+    Ok(res.rows_affected())
+}
+
 pub async fn find_for_status_update(
     pool: &PgPool,
     id: TransaksiId,
 ) -> Result<Option<(TransaksiStatus, f64, Currency, f64)>, sqlx::Error> {
     sqlx::query_as::<_, (TransaksiStatus, f64, Currency, f64)>(
-        "SELECT status, total_akhir, currency, fx_rate FROM transaksi WHERE id=$1 AND is_deleted=false",
+        "SELECT status, total_akhir::float8 AS total_akhir, currency, fx_rate::float8 AS fx_rate FROM transaksi WHERE id=$1 AND is_deleted=false",
     )
     .bind(id.0)
     .fetch_optional(pool)
@@ -111,7 +167,7 @@ pub async fn fetch_candidates_for_reconcile(
     pool: &PgPool,
 ) -> Result<Vec<(TransaksiId, NaiveDate, f64)>, sqlx::Error> {
     let sql = format!(
-        "SELECT id, tanggal::date, total_akhir * fx_rate as idr FROM transaksi WHERE is_deleted=false AND status IN ({})",
+        "SELECT id, tanggal::date, (total_akhir * fx_rate)::float8 as idr FROM transaksi WHERE is_deleted=false AND status IN ({})",
         crate::utils::currency::PAID_STATUSES_SQL
     );
     sqlx::query_as::<_, (TransaksiId, NaiveDate, f64)>(&sql)
@@ -136,7 +192,7 @@ pub async fn fetch_export_rows(
     sqlx::Error,
 > {
     sqlx::query_as::<_, (i64, String, String, String, String, String, String, f64, String)>(
-        "SELECT id, tanggal::text, jenis::text, divisi, kategori, entitas_terkait, akun_pembayaran, total_akhir, status::text FROM transaksi WHERE is_deleted=false ORDER BY tanggal DESC LIMIT 5000"
+        "SELECT id, tanggal::text, jenis::text, divisi, kategori, entitas_terkait, akun_pembayaran, total_akhir::float8 AS total_akhir, status::text FROM transaksi WHERE is_deleted=false ORDER BY tanggal DESC LIMIT 5000"
     )
     .fetch_all(pool)
     .await

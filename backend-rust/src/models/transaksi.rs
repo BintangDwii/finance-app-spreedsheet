@@ -26,7 +26,7 @@ pub struct Transaksi {
     pub file_bukti: Option<String>,
     pub catatan: Option<String>,
     pub created_by: Option<String>,
-    pub updated_at: Option<chrono::NaiveDateTime>,
+    pub updated_at: Option<chrono::DateTime<chrono::Utc>>,
     pub is_deleted: bool,
     pub idr_amount: Option<f64>,
 }
@@ -73,6 +73,12 @@ pub struct ListParams {
     pub search: Option<String>,
     pub page: Option<i64>,
     pub per_page: Option<i64>,
+}
+
+#[derive(Debug, Deserialize, Validate)]
+pub struct SetBuktiRequest {
+    #[validate(length(min = 3, max = 255))]
+    pub file_bukti: String,
 }
 
 #[cfg(test)]

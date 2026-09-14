@@ -1,0 +1,10 @@
+# SQLite legacy baseline (2026-09-14) — source for one-shot Postgres migration
+# Recorded before deleting legacy Python runtime. Keep data/corporate.db +
+# scripts/migrate_sqlite_to_postgres.py until migration is verified, then delete.
+
+users 5
+accounts 7
+transaksi 151
+budgets 61
+audit_log 0
+reconciliation 0
