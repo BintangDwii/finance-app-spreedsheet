@@ -1,0 +1,5 @@
+[serve]
+port = 8080
+
+[serve.proxy]
+"/api" = "http://127.0.0.1:8000"
